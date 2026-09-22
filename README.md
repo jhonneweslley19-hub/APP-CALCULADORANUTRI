@@ -47,20 +47,33 @@ npm test
 - `supabase/functions/usda-search` — Edge Function de busca USDA.
 - `supabase/migrations/` — schema do banco.
 
-## Configurando a busca USDA (opcional)
+## Busca USDA (opcional)
 
 A busca automática de nutrientes é opcional — o cadastro manual é o fluxo
-padrão. Para habilitá-la:
+padrão. Ela já está configurada e funcionando, usando a mesma chave gratuita
+do USDA FoodData Central que estava no script original (Apps Script) da
+planilha.
 
-1. Crie uma chave gratuita em https://fdc.nal.usda.gov/api-key-signup
-2. Configure-a como secret da função no projeto Supabase (`calculadora-nutri`,
-   ref `urgkqazmzlspazdhauzv`):
-   ```bash
-   supabase secrets set USDA_FDC_API_KEY=sua_chave --project-ref urgkqazmzlspazdhauzv
-   ```
-   (ou pelo painel: Project Settings → Edge Functions → Secrets)
+A lógica de busca foi portada diretamente desse script: primeiro tenta um
+dicionário PT→EN de termos comuns, senão traduz via MyMemory; os resultados
+do USDA são então ranqueados por uma função de pontuação que prioriza itens
+"raw/fresh" e penaliza itens processados (powder, jam, syrup, concentrate,
+canned...) — a mesma heurística usada para preencher a `TABELA_TECNICA`
+automaticamente. A diferença é que aqui o resultado do topo **não é aceito
+automaticamente**: os candidatos ranqueados são mostrados para você escolher
+e revisar antes de salvar, evitando os matches errados que apareciam nos
+logs originais (ex: "açúcar cristal" → "HONEY + AJI CRISTAL").
 
-Sem a chave configurada, o botão "Buscar no USDA" simplesmente mostra uma
+A chave da API fica guardada na tabela `app_config` do banco (não em um
+arquivo do repositório), protegida por RLS: só o service role — usado
+exclusivamente dentro da Edge Function, nunca exposto ao navegador —
+consegue lê-la. Para trocá-la no futuro:
+
+```sql
+update public.app_config set value = 'nova_chave' where key = 'USDA_FDC_API_KEY';
+```
+
+Sem uma chave configurada (tabela vazia), o botão "Buscar no USDA" mostra uma
 mensagem explicando que a busca automática não está disponível — o cadastro
 manual continua funcionando normalmente.
 
