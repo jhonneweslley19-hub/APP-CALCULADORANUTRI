@@ -2,9 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
+import { ArrowLeft, Download, FileImage } from 'lucide-react'
 import { getProduct, listProductIngredients } from '../lib/api'
 import { computeLabel, computePercentualVD, recipeTotals, roundForDisplay } from '../lib/nutrition'
 import type { Product, ProductIngredientWithDetails } from '../types/database'
+import Button from '../components/ui/Button'
+import Skeleton from '../components/ui/Skeleton'
+import { useToast } from '../lib/toast'
 
 function fmt(value: number, decimals = 1): string {
   return value.toLocaleString('pt-BR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
@@ -12,11 +16,11 @@ function fmt(value: number, decimals = 1): string {
 
 export default function LabelPage() {
   const { id } = useParams<{ id: string }>()
+  const toast = useToast()
   const [product, setProduct] = useState<Product | null>(null)
   const [lines, setLines] = useState<ProductIngredientWithDetails[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [exporting, setExporting] = useState(false)
+  const [exporting, setExporting] = useState<'png' | 'pdf' | null>(null)
   const labelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -26,8 +30,9 @@ export default function LabelPage() {
         setProduct(prod)
         setLines(prodLines)
       })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
       .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
   const totals = useMemo(
@@ -39,7 +44,7 @@ export default function LabelPage() {
 
   async function handleExport(type: 'png' | 'pdf') {
     if (!labelRef.current) return
-    setExporting(true)
+    setExporting(type)
     try {
       const canvas = await html2canvas(labelRef.current, { scale: 3, backgroundColor: '#ffffff' })
       if (type === 'png') {
@@ -56,13 +61,21 @@ export default function LabelPage() {
         pdf.addImage(imgData, 'PNG', (pageWidth - imgWidth) / 2, 15, imgWidth, imgHeight)
         pdf.save(`rotulo-${product?.nome ?? 'produto'}.pdf`)
       }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
-      setExporting(false)
+      setExporting(null)
     }
   }
 
-  if (loading) return <p className="text-sm text-slate-500">Carregando...</p>
-  if (error) return <p className="text-sm text-red-600">{error}</p>
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-40" />
+        <Skeleton className="h-96 max-w-sm mx-auto" />
+      </div>
+    )
+  }
   if (!product || !label || !vd) return null
 
   const proteinaPorcaoDisplay = roundForDisplay(label.perServing.proteinas_g)
@@ -70,25 +83,37 @@ export default function LabelPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <Link to={`/produtos/${product.id}`} className="text-sm text-slate-500 hover:underline">
-          ← Voltar para o produto
+        <Link
+          to={`/produtos/${product.id}`}
+          className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1"
+        >
+          <ArrowLeft className="size-4" /> Voltar para o produto
         </Link>
         <div className="flex gap-2">
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => handleExport('png')}
-            disabled={exporting}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 disabled:opacity-50"
+            loading={exporting === 'png'}
+            disabled={exporting !== null}
+            icon={<FileImage className="size-4" />}
           >
-            Exportar PNG
-          </button>
-          <button
+            PNG
+          </Button>
+          <Button
+            size="sm"
             onClick={() => handleExport('pdf')}
-            disabled={exporting}
-            className="rounded-md bg-emerald-600 text-white px-3 py-2 text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+            loading={exporting === 'pdf'}
+            disabled={exporting !== null}
+            icon={<Download className="size-4" />}
           >
-            Exportar PDF
-          </button>
+            PDF
+          </Button>
         </div>
+      </div>
+
+      <div className="text-center">
+        <h1 className="font-semibold text-slate-800">{product.nome}</h1>
       </div>
 
       <div className="flex justify-center">

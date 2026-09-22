@@ -37,6 +37,38 @@ export async function listProducts(): Promise<Product[]> {
   return data
 }
 
+export async function listRecentProducts(limit: number): Promise<Product[]> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .order('updated_at', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return data
+}
+
+export interface DashboardStats {
+  totalProducts: number
+  totalIngredients: number
+  usdaIngredients: number
+}
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  const [products, ingredients, usda] = await Promise.all([
+    supabase.from('products').select('*', { count: 'exact', head: true }),
+    supabase.from('ingredients').select('*', { count: 'exact', head: true }),
+    supabase.from('ingredients').select('*', { count: 'exact', head: true }).eq('origem', 'usda'),
+  ])
+  if (products.error) throw products.error
+  if (ingredients.error) throw ingredients.error
+  if (usda.error) throw usda.error
+  return {
+    totalProducts: products.count ?? 0,
+    totalIngredients: ingredients.count ?? 0,
+    usdaIngredients: usda.count ?? 0,
+  }
+}
+
 export async function getProduct(id: string): Promise<Product> {
   const { data, error } = await supabase.from('products').select('*').eq('id', id).single()
   if (error) throw error
