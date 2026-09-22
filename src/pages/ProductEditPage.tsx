@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { ArrowLeft, FileText, Plus, Trash2 } from 'lucide-react'
 import {
   addProductIngredient,
   getProduct,
@@ -11,22 +12,27 @@ import {
 } from '../lib/api'
 import { computeLabel, recipeTotals } from '../lib/nutrition'
 import type { Ingredient, Product, ProductIngredientWithDetails } from '../types/database'
+import Card, { CardBody, CardHeader } from '../components/ui/Card'
+import Button from '../components/ui/Button'
+import Field, { inputClass } from '../components/ui/Field'
+import EmptyState from '../components/ui/EmptyState'
+import Skeleton from '../components/ui/Skeleton'
+import { useToast } from '../lib/toast'
 
 export default function ProductEditPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const toast = useToast()
   const [product, setProduct] = useState<Product | null>(null)
   const [lines, setLines] = useState<ProductIngredientWithDetails[]>([])
   const [allIngredients, setAllIngredients] = useState<Ingredient[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [newIngredientId, setNewIngredientId] = useState('')
   const [newQty, setNewQty] = useState('')
 
   async function refresh() {
     if (!id) return
-    setLoading(true)
     try {
       const [prod, prodLines, ingredients] = await Promise.all([
         getProduct(id),
@@ -36,9 +42,8 @@ export default function ProductEditPage() {
       setProduct(prod)
       setLines(prodLines)
       setAllIngredients(ingredients)
-      setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
@@ -62,9 +67,9 @@ export default function ProductEditPage() {
     try {
       const { id: _id, created_at: _c, updated_at: _u, ...input } = product
       await updateProduct(product.id, input)
-      setError(null)
+      toast.success('Dados do produto salvos.')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
     }
@@ -79,7 +84,7 @@ export default function ProductEditPage() {
       setNewQty('')
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -89,7 +94,7 @@ export default function ProductEditPage() {
     try {
       await updateProductIngredientQuantity(lineId, qty)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -98,11 +103,19 @@ export default function ProductEditPage() {
       await removeProductIngredient(lineId)
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     }
   }
 
-  if (loading) return <p className="text-sm text-slate-500">Carregando...</p>
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-40" />
+        <Skeleton className="h-40" />
+        <Skeleton className="h-60" />
+      </div>
+    )
+  }
   if (!product) return <p className="text-sm text-red-600">Produto não encontrado.</p>
 
   const availableIngredients = allIngredients.filter((i) => !lines.some((l) => l.ingredient_id === i.id))
@@ -110,175 +123,224 @@ export default function ProductEditPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <button onClick={() => navigate('/produtos')} className="text-sm text-slate-500 hover:underline">
-          ← Produtos
-        </button>
-        <Link
-          to={`/produtos/${product.id}/rotulo`}
-          className="rounded-md bg-emerald-600 text-white px-4 py-2 text-sm font-medium hover:bg-emerald-700"
+        <button
+          onClick={() => navigate('/produtos')}
+          className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1"
         >
-          Ver rótulo →
+          <ArrowLeft className="size-4" /> Produtos
+        </button>
+        <Link to={`/produtos/${product.id}/rotulo`}>
+          <Button icon={<FileText className="size-4" />}>Ver rótulo</Button>
         </Link>
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      <form onSubmit={handleSaveProduct} className="bg-white border border-slate-200 rounded-md p-4 space-y-3">
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Nome do produto</label>
-          <input
-            value={product.nome}
-            onChange={(e) => setProduct({ ...product, nome: e.target.value })}
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-          />
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Produção total (g)</label>
-            <input
-              type="number"
-              step="any"
-              value={product.producao_total_g}
-              onChange={(e) => setProduct({ ...product, producao_total_g: Number(e.target.value) })}
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            />
+      <Card>
+        <CardHeader>
+          <h2 className="text-sm font-semibold text-slate-800">Dados do produto</h2>
+        </CardHeader>
+        <form onSubmit={handleSaveProduct}>
+          <CardBody className="space-y-4">
+            <Field label="Nome do produto">
+              <input
+                value={product.nome}
+                onChange={(e) => setProduct({ ...product, nome: e.target.value })}
+                className={inputClass}
+              />
+            </Field>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Field label="Produção total (g)">
+                <input
+                  type="number"
+                  step="any"
+                  value={product.producao_total_g}
+                  onChange={(e) => setProduct({ ...product, producao_total_g: Number(e.target.value) })}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Embalagem (g)">
+                <input
+                  type="number"
+                  step="any"
+                  value={product.embalagem_g ?? ''}
+                  onChange={(e) =>
+                    setProduct({ ...product, embalagem_g: e.target.value === '' ? null : Number(e.target.value) })
+                  }
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Porção (g)">
+                <input
+                  type="number"
+                  step="any"
+                  value={product.porcao_g}
+                  onChange={(e) => setProduct({ ...product, porcao_g: Number(e.target.value) })}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Medida caseira" hint='ex: "1 colher de sopa"'>
+                <input
+                  value={product.porcao_medida_caseira ?? ''}
+                  onChange={(e) => setProduct({ ...product, porcao_medida_caseira: e.target.value || null })}
+                  className={inputClass}
+                />
+              </Field>
+            </div>
+          </CardBody>
+          <div className="flex justify-end px-5 py-4 border-t border-slate-100">
+            <Button type="submit" size="sm" loading={saving}>
+              Salvar dados do produto
+            </Button>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Embalagem (g)</label>
-            <input
-              type="number"
-              step="any"
-              value={product.embalagem_g ?? ''}
-              onChange={(e) =>
-                setProduct({ ...product, embalagem_g: e.target.value === '' ? null : Number(e.target.value) })
-              }
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Porção (g)</label>
-            <input
-              type="number"
-              step="any"
-              value={product.porcao_g}
-              onChange={(e) => setProduct({ ...product, porcao_g: Number(e.target.value) })}
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Medida caseira</label>
-            <input
-              placeholder='ex: "1 colher de sopa"'
-              value={product.porcao_medida_caseira ?? ''}
-              onChange={(e) => setProduct({ ...product, porcao_medida_caseira: e.target.value || null })}
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            />
-          </div>
-        </div>
-        <button
-          type="submit"
-          disabled={saving}
-          className="rounded-md bg-slate-800 text-white px-4 py-2 text-sm font-medium hover:bg-slate-900 disabled:opacity-50"
-        >
-          {saving ? 'Salvando...' : 'Salvar dados do produto'}
-        </button>
-      </form>
-
-      <div className="bg-white border border-slate-200 rounded-md p-4">
-        <h3 className="text-sm font-semibold mb-3">Ingredientes da receita</h3>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
-              <th className="py-2">Ingrediente</th>
-              <th className="py-2 w-32">Quantidade (g)</th>
-              <th className="py-2 w-16"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((line) => (
-              <tr key={line.id} className="border-b border-slate-100">
-                <td className="py-2">{line.ingredient.nome}</td>
-                <td className="py-2">
-                  <input
-                    type="number"
-                    step="any"
-                    value={line.quantidade_g}
-                    onChange={(e) => handleQtyChange(line.id, e.target.value)}
-                    className="w-24 rounded-md border border-slate-300 px-2 py-1"
-                  />
-                </td>
-                <td className="py-2">
-                  <button onClick={() => handleRemoveLine(line.id)} className="text-slate-400 hover:text-red-600">
-                    remover
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <form onSubmit={handleAddIngredient} className="flex gap-2 mt-3">
-          <select
-            value={newIngredientId}
-            onChange={(e) => setNewIngredientId(e.target.value)}
-            className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
-          >
-            <option value="">Selecione um ingrediente...</option>
-            {availableIngredients.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.nome}
-              </option>
-            ))}
-          </select>
-          <input
-            type="number"
-            step="any"
-            placeholder="g"
-            value={newQty}
-            onChange={(e) => setNewQty(e.target.value)}
-            className="w-24 rounded-md border border-slate-300 px-3 py-2 text-sm"
-          />
-          <button
-            type="submit"
-            disabled={!newIngredientId || !newQty}
-            className="rounded-md bg-emerald-600 text-white px-4 py-2 text-sm font-medium disabled:opacity-50"
-          >
-            Adicionar
-          </button>
         </form>
-        {allIngredients.length === 0 && (
-          <p className="text-xs text-slate-400 mt-2">
-            Nenhum ingrediente cadastrado ainda. <Link to="/ingredientes" className="underline">Cadastre um</Link>{' '}
-            primeiro.
-          </p>
-        )}
-      </div>
+      </Card>
 
-      {label && (
-        <div className="bg-white border border-slate-200 rounded-md p-4">
-          <h3 className="text-sm font-semibold mb-3">Prévia (por 100g / por porção)</h3>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-slate-500 text-xs mb-1">100g de produto</p>
-              <p>{label.per100g.energia_kcal.toFixed(1)} kcal</p>
-              <p>{label.per100g.carboidratos_g.toFixed(1)} g carboidratos</p>
-              <p>{label.per100g.proteinas_g.toFixed(1)} g proteínas</p>
-              <p>{label.per100g.gorduras_totais_g.toFixed(1)} g gorduras totais</p>
+      <Card>
+        <CardHeader>
+          <h2 className="text-sm font-semibold text-slate-800">Ingredientes da receita</h2>
+        </CardHeader>
+        <CardBody>
+          {lines.length === 0 ? (
+            <EmptyState
+              icon={FileText}
+              title="Nenhum ingrediente na receita"
+              description="Adicione ingredientes abaixo para começar a calcular o rótulo."
+            />
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                  <th className="pb-2 font-medium">Ingrediente</th>
+                  <th className="pb-2 font-medium w-28">Quantidade</th>
+                  <th className="pb-2 font-medium w-20 text-right">kcal</th>
+                  <th className="pb-2 w-10"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((line) => {
+                  const kcal = (line.quantidade_g / 100) * line.ingredient.energia_kcal
+                  return (
+                    <tr key={line.id} className="border-b border-slate-50 last:border-0">
+                      <td className="py-2.5 text-slate-700">{line.ingredient.nome}</td>
+                      <td className="py-2.5">
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            step="any"
+                            value={line.quantidade_g}
+                            onChange={(e) => handleQtyChange(line.id, e.target.value)}
+                            className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+                          />
+                          <span className="text-xs text-slate-400">g</span>
+                        </div>
+                      </td>
+                      <td className="py-2.5 text-right text-slate-500">{kcal.toFixed(0)}</td>
+                      <td className="py-2.5 text-right">
+                        <button
+                          onClick={() => handleRemoveLine(line.id)}
+                          className="text-slate-300 hover:text-red-500"
+                          aria-label="Remover"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+
+          <form onSubmit={handleAddIngredient} className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
+            <select
+              value={newIngredientId}
+              onChange={(e) => setNewIngredientId(e.target.value)}
+              className={`${inputClass} flex-1`}
+            >
+              <option value="">Selecione um ingrediente...</option>
+              {availableIngredients.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.nome}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              step="any"
+              placeholder="g"
+              value={newQty}
+              onChange={(e) => setNewQty(e.target.value)}
+              className={`${inputClass} w-24`}
+            />
+            <Button type="submit" disabled={!newIngredientId || !newQty} icon={<Plus className="size-4" />}>
+              Adicionar
+            </Button>
+          </form>
+          {allIngredients.length === 0 && (
+            <p className="text-xs text-slate-400 mt-2">
+              Nenhum ingrediente cadastrado ainda.{' '}
+              <Link to="/ingredientes" className="text-brand-700 underline">
+                Cadastre um
+              </Link>{' '}
+              primeiro.
+            </p>
+          )}
+        </CardBody>
+      </Card>
+
+      {label && lines.length > 0 && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-sm font-semibold text-slate-800">Prévia do rótulo</h2>
+          </CardHeader>
+          <CardBody>
+            <div className="grid grid-cols-2 gap-6">
+              <PreviewColumn title="100g de produto" values={label.per100g} energia={label.per100g.energia_kcal} />
+              <PreviewColumn
+                title={`1 porção (${product.porcao_g}g)`}
+                values={label.perServing}
+                energia={label.valorCaloricoPorcao}
+              />
             </div>
-            <div>
-              <p className="text-slate-500 text-xs mb-1">1 porção ({product.porcao_g}g)</p>
-              <p>{label.valorCaloricoPorcao.toFixed(1)} kcal</p>
-              <p>{label.perServing.carboidratos_g.toFixed(1)} g carboidratos</p>
-              <p>{label.perServing.proteinas_g.toFixed(1)} g proteínas</p>
-              <p>{label.perServing.gorduras_totais_g.toFixed(1)} g gorduras totais</p>
-            </div>
-          </div>
-          <p className="text-xs text-slate-400 mt-3">
-            Rendimento do lote: {label.totalPorcoesLote.toFixed(1)} porções
-            {label.porcoesPorEmbalagem !== null && ` · ${label.porcoesPorEmbalagem.toFixed(1)} porções/embalagem`}
-          </p>
-        </div>
+            <p className="text-xs text-slate-400 mt-4 pt-4 border-t border-slate-100">
+              Rendimento do lote: {label.totalPorcoesLote.toFixed(1)} porções
+              {label.porcoesPorEmbalagem !== null && ` · ${label.porcoesPorEmbalagem.toFixed(1)} porções/embalagem`}
+            </p>
+          </CardBody>
+        </Card>
       )}
+    </div>
+  )
+}
+
+function PreviewColumn({
+  title,
+  values,
+  energia,
+}: {
+  title: string
+  values: { carboidratos_g: number; proteinas_g: number; gorduras_totais_g: number }
+  energia: number
+}) {
+  return (
+    <div>
+      <p className="text-xs text-slate-400 mb-2">{title}</p>
+      <p className="text-2xl font-bold text-brand-700 mb-2">
+        {energia.toFixed(0)} <span className="text-sm font-medium text-slate-400">kcal</span>
+      </p>
+      <dl className="space-y-1 text-sm">
+        <div className="flex justify-between">
+          <dt className="text-slate-500">Carboidratos</dt>
+          <dd className="text-slate-700 font-medium">{values.carboidratos_g.toFixed(1)} g</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt className="text-slate-500">Proteínas</dt>
+          <dd className="text-slate-700 font-medium">{values.proteinas_g.toFixed(1)} g</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt className="text-slate-500">Gorduras totais</dt>
+          <dd className="text-slate-700 font-medium">{values.gorduras_totais_g.toFixed(1)} g</dd>
+        </div>
+      </dl>
     </div>
   )
 }
