@@ -1,105 +1,144 @@
-# Calculadora Nutri
+# 🥗 Calculadora Nutri
 
-App web para montar a receita de um produto alimentício, calcular os valores
-nutricionais totais e gerar a tabela de informação nutricional (rótulo)
-pronta para embalagem, no padrão ANVISA (IN 75/2020 / RDC 429/2020).
+**Da receita ao rótulo nutricional no padrão ANVISA, em minutos.**
 
-Reconstrói, como aplicação, a lógica que antes vivia em uma planilha do
-Google Sheets (`TABELA_TECNICA`, `USDA_LOGS`, `CALCULO_NUTRICIONAL`).
+App web que ajuda produtores de alimentos a montar a receita de um produto, calcular automaticamente os valores nutricionais e gerar a **tabela de informação nutricional** pronta para a embalagem, seguindo a **IN 75/2020** e a **RDC 429/2020**. O rótulo pode ser exportado em PNG ou PDF.
 
-## Stack
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Edge%20Functions-3ECF8E?logo=supabase&logoColor=white)
+![Vitest](https://img.shields.io/badge/testes-Vitest-6E9F18?logo=vitest&logoColor=white)
 
-- React + Vite + TypeScript + Tailwind CSS
-- Supabase (Postgres) para persistência — sem login por enquanto (uso
-  pessoal); o schema já tem RLS habilitado com uma policy aberta para o
-  papel `anon`, pronta para ser restringida quando autenticação for
-  adicionada.
-- Supabase Edge Function (`usda-search`) como proxy opcional para buscar
-  nutrientes no USDA FoodData Central, com tradução PT→EN via MyMemory.
+---
 
-## Rodando localmente
+## 💡 O problema
+
+O cálculo era feito numa planilha do Google Sheets com Apps Script. Funcionava, mas:
+
+- as fórmulas tinham **dois erros de cálculo** que passavam despercebidos (detalhados abaixo);
+- a busca automática de nutrientes no USDA **aceitava sempre o primeiro resultado**, o que gerava associações erradas, como "açúcar cristal" → *"HONEY + AJI CRISTAL"*.
+
+## ✅ A solução
+
+Transformei a planilha em uma aplicação web, mantendo a lógica original, corrigindo os erros e melhorando a experiência de uso.
+
+| Funcionalidade | Descrição |
+|---|---|
+| **Cadastro de ingredientes** | 15 nutrientes por 100 g/ml, inseridos manualmente ou importados do USDA |
+| **Busca no USDA FoodData Central** | Tradução PT→EN, ranking por relevância e **escolha manual** do resultado certo |
+| **Montagem de receitas** | Ingredientes + quantidades, com prévia dos valores calculados |
+| **Rótulo ANVISA** | Valores por 100 g e por porção, %VD e regra de declaração de "0" |
+| **Exportação** | Rótulo em PNG ou PDF, pronto para impressão |
+| **Painel** | Resumo de produtos, ingredientes e itens importados do USDA |
+
+## 🏗️ Arquitetura
+
+```
+┌──────────────────────┐        ┌──────────────────────────────┐
+│  React + TypeScript  │ ─────▶ │  Supabase Postgres (RLS)     │
+│  (Vite, Tailwind)    │        │  ingredients · products ·    │
+│                      │        │  product_ingredients         │
+│  lib/nutrition.ts    │        └──────────────────────────────┘
+│  (motor de cálculo   │        ┌──────────────────────────────┐
+│   puro e testado)    │ ─────▶ │  Edge Function `usda-search` │ ──▶ USDA FoodData Central
+└──────────────────────┘        │  (chave da API só no server) │ ──▶ MyMemory (tradução)
+                                └──────────────────────────────┘
+```
+
+- **Motor de cálculo isolado** (`src/lib/nutrition.ts`): funções puras, sem dependência de UI ou banco, cobertas por testes que usam **os valores reais da planilha original** como referência.
+- **Energia recalculada pelos fatores de Atwater**: carboidratos × 4 + proteínas × 4 + gorduras × 9 + fibras × 2.
+- **Tabela de VDR** (`src/lib/vdr.ts`) conforme a IN 75/2020.
+- **Busca USDA no servidor**: a chave da API nunca chega ao navegador.
+
+### Como a busca no USDA escolhe os resultados
+
+1. Tenta um dicionário PT→EN de termos comuns e, se não encontrar, traduz via MyMemory.
+2. Busca no USDA e dá uma pontuação a cada resultado: favorece itens *raw/fresh* e bases de referência (SR, Foundation) e penaliza itens processados (*powder, jam, syrup, canned…*). Também usa a distância de Levenshtein até o termo buscado.
+3. Mostra os 6 melhores candidatos para **o usuário revisar e escolher**, em vez de aceitar o primeiro automaticamente.
+
+## 🐛 Erros da planilha original que foram corrigidos
+
+Encontrados durante a migração e cobertos por testes automatizados:
+
+1. **Açúcares totais por 100 g**: a fórmula lia por engano a coluna de *carboidratos*, então os açúcares sempre saíam iguais aos carboidratos.
+2. **Proteínas por porção**: a planilha zerava o valor sempre que o *total da receita* passava de 0,5 g, o que acontecia quase sempre. A regra correta da ANVISA declara "0" quando o valor *por porção* é menor que 0,5 g. Isso foi implementado em `roundForDisplay()`.
+
+## 🔐 Segurança
+
+- Nenhuma credencial no repositório: `.env` está no `.gitignore` e só `.env.example` é versionado.
+- O navegador usa apenas a **publishable key** do Supabase, que foi feita para ser pública.
+- A chave da API do USDA fica numa variável de ambiente da Edge Function ou na tabela `app_config`, protegida por **RLS sem nenhuma policy** (só o *service role* do servidor consegue ler).
+- A Edge Function valida a entrada (tamanho máximo da busca) e não expõe detalhes internos nas mensagens de erro.
+- A tabela de logs do USDA não pode ser acessada pelo navegador.
+
+> ⚠️ **Limitação conhecida:** o app ainda **não tem login**. Ele foi feito para uso pessoal, e por isso as tabelas de ingredientes e produtos aceitam leitura e escrita com a publishable key. Antes de abrir para vários usuários, o próximo passo é adicionar **Supabase Auth** e trocar as policies para `authenticated` (com `owner_id = auth.uid()`). Veja o roadmap.
+
+## 🚀 Rodando localmente
+
+Pré-requisitos: Node 20+ e um projeto no [Supabase](https://supabase.com) (o plano gratuito serve).
 
 ```bash
+git clone https://github.com/jhonneweslley19-hub/APP-CALCULADORANUTRI.git
+cd APP-CALCULADORANUTRI
 npm install
-cp .env.example .env   # preencha com a URL e a publishable key do projeto Supabase
+cp .env.example .env   # preencha com a URL e a publishable key do seu projeto Supabase
 npm run dev
 ```
 
-Testes do motor de cálculo (validados contra os valores reais extraídos da
-planilha original):
+Banco de dados: aplique os arquivos de `supabase/migrations/` em ordem (pelo SQL Editor ou com `supabase db push`).
+
+Busca USDA (opcional): crie uma chave gratuita em <https://fdc.nal.usda.gov/api-key-signup>, publique a função com `supabase functions deploy usda-search` e configure o segredo:
+
+```bash
+supabase secrets set USDA_FDC_API_KEY=sua_chave
+```
+
+Sem a chave, o cadastro manual continua funcionando normalmente.
+
+### Testes
 
 ```bash
 npm test
 ```
 
-## Estrutura
+## 📁 Estrutura
 
-- `src/lib/nutrition.ts` — motor de cálculo puro: soma dos ingredientes da
-  receita, valores por 100g/por porção, energia recalculada por Atwater
-  (carboidratos×4 + proteínas×4 + gorduras×9 + fibra×2) e %VD.
-- `src/lib/vdr.ts` — tabela de Valores Diários de Referência (IN 75/2020).
-- `src/pages/IngredientsPage.tsx` — cadastro manual de ingredientes (16
-  nutrientes por 100g) + busca opcional no USDA.
-- `src/pages/ProductEditPage.tsx` — monta a receita (ingrediente +
-  quantidade) e mostra uma prévia dos valores calculados.
-- `src/pages/LabelPage.tsx` — rótulo final no layout ANVISA, com exportação
-  para PNG/PDF.
-- `supabase/functions/usda-search` — Edge Function de busca USDA.
-- `supabase/migrations/` — schema do banco.
-
-## Busca USDA (opcional)
-
-A busca automática de nutrientes é opcional — o cadastro manual é o fluxo
-padrão. Ela já está configurada e funcionando, usando a mesma chave gratuita
-do USDA FoodData Central que estava no script original (Apps Script) da
-planilha.
-
-A lógica de busca foi portada diretamente desse script: primeiro tenta um
-dicionário PT→EN de termos comuns, senão traduz via MyMemory; os resultados
-do USDA são então ranqueados por uma função de pontuação que prioriza itens
-"raw/fresh" e penaliza itens processados (powder, jam, syrup, concentrate,
-canned...) — a mesma heurística usada para preencher a `TABELA_TECNICA`
-automaticamente. A diferença é que aqui o resultado do topo **não é aceito
-automaticamente**: os candidatos ranqueados são mostrados para você escolher
-e revisar antes de salvar, evitando os matches errados que apareciam nos
-logs originais (ex: "açúcar cristal" → "HONEY + AJI CRISTAL").
-
-A chave da API fica guardada na tabela `app_config` do banco (não em um
-arquivo do repositório), protegida por RLS: só o service role — usado
-exclusivamente dentro da Edge Function, nunca exposto ao navegador —
-consegue lê-la. Para trocá-la no futuro:
-
-```sql
-update public.app_config set value = 'nova_chave' where key = 'USDA_FDC_API_KEY';
+```
+src/
+├── lib/
+│   ├── nutrition.ts        # motor de cálculo (puro + testado)
+│   ├── nutrition.test.ts   # testes validados contra a planilha original
+│   ├── vdr.ts              # Valores Diários de Referência (IN 75/2020)
+│   └── api.ts              # acesso ao Supabase
+├── pages/
+│   ├── HomePage.tsx        # painel
+│   ├── IngredientsPage.tsx # cadastro + busca USDA
+│   ├── ProductsPage.tsx    # lista de produtos
+│   ├── ProductEditPage.tsx # montagem da receita
+│   └── LabelPage.tsx       # rótulo ANVISA + exportação PNG/PDF
+└── components/             # UI reutilizável e modal de busca USDA
+supabase/
+├── functions/usda-search/  # Edge Function (Deno)
+└── migrations/             # schema e políticas de acesso
+docs/planilha-original/     # planilha que deu origem ao projeto
 ```
 
-Sem uma chave configurada (tabela vazia), o botão "Buscar no USDA" mostra uma
-mensagem explicando que a busca automática não está disponível — o cadastro
-manual continua funcionando normalmente.
+## 🗺️ Roadmap
 
-## Diferenças em relação à planilha original
+- [ ] Autenticação com Supabase Auth e dados separados por usuário
+- [ ] Limite de requisições na busca USDA
+- [ ] Vitaminas e minerais no rótulo (a tabela de VDR já está pronta)
+- [ ] Rotulagem nutricional frontal (lupa) da RDC 429/2020
+- [ ] Testes de ponta a ponta (Playwright)
 
-Ao portar a lógica de cálculo, dois bugs encontrados na planilha foram
-corrigidos (a pedido, ao invés de replicados):
+## 📄 Licença
 
-1. **Açúcares totais por 100g** — a planilha usava por engano a coluna de
-   Carboidratos nessa célula, fazendo o valor de açúcares totais sair igual
-   ao de carboidratos. Corrigido para usar a coluna correta.
-2. **Proteínas por porção** — a planilha zerava esse valor sempre que o
-   *total da receita* (não da porção) ultrapassava 0,5g, o que ocorria quase
-   sempre. A regra correta da ANVISA (declarar "0" quando o valor *por
-   porção* for menor que 0,5g) foi implementada em `roundForDisplay()`.
+[MIT](LICENSE) © 2026 Jhonne Weslley
 
-## Projeto Supabase
+---
 
-Um projeto dedicado (`calculadora-nutri`) foi criado na mesma organização
-dos projetos PLANOGRAMA. Como a conta estava no limite de 2 projetos
-gratuitos, o projeto `PLANOGRAMA` (o mais antigo dos dois) foi **pausado**
-para abrir espaço — pode ser reativado a qualquer momento pelo painel do
-Supabase.
+Feito por **Jhonne Weslley**, estudante de Engenharia de Software · [GitHub](https://github.com/jhonneweslley19-hub) · [LinkedIn](https://www.linkedin.com/in/jhonne-w-038b57127)
 
-## Deploy
-
-Qualquer host de site estático funciona (Vercel, Netlify, Cloudflare Pages):
-build com `npm run build`, publique a pasta `dist/`, e configure as mesmas
-variáveis de ambiente do `.env` no painel do host.
+> ℹ️ Os valores gerados servem de apoio à rotulagem. Confira sempre a legislação vigente e, se necessário, valide com um profissional responsável.
