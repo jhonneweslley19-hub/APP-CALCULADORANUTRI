@@ -30,6 +30,8 @@ const DICT_PT_EN: Record<string, string> = {
   'queijo mussarela': 'mozzarella cheese',
 }
 
+const MAX_QUERY_LENGTH = 100
+
 const POSITIVE_KEYWORDS = ['raw', 'fresh', 'uncooked', 'whole', 'unprocessed']
 const NEGATIVE_KEYWORDS = [
   'powder', 'concentrate', 'concentrated', 'dried', 'dehydrated', 'jam', 'jelly',
@@ -177,12 +179,14 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { query } = await req.json()
-    if (!query || typeof query !== 'string') {
-      return new Response(JSON.stringify({ error: 'Campo "query" é obrigatório.' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    const body = await req.json().catch(() => null)
+    const query = typeof body?.query === 'string' ? body.query.trim() : ''
+    // Limita o tamanho da busca: evita abuso da cota da USDA/MyMemory e logs gigantes
+    if (!query || query.length > MAX_QUERY_LENGTH) {
+      return new Response(
+        JSON.stringify({ error: `Campo "query" é obrigatório (até ${MAX_QUERY_LENGTH} caracteres).` }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
@@ -208,6 +212,7 @@ Deno.serve(async (req: Request) => {
     searchUrl.searchParams.set('pageSize', '15')
 
     const fdcRes = await fetch(searchUrl)
+    if (!fdcRes.ok) throw new Error(`USDA respondeu ${fdcRes.status}`)
     const fdcJson = await fdcRes.json()
     const foods: FdcFood[] = fdcJson?.foods ?? []
 
@@ -238,7 +243,10 @@ Deno.serve(async (req: Request) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), {
+    // Detalhes só no log do servidor; o cliente recebe uma mensagem genérica
+    // (a mensagem original pode conter a URL da USDA com a api_key na query string)
+    console.error('usda-search:', err)
+    return new Response(JSON.stringify({ error: 'Falha ao consultar o USDA. Tente novamente.' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
